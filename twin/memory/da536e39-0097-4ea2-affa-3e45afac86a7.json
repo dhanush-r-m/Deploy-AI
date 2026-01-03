@@ -1,0 +1,22 @@
+[
+  {
+    "role": "user",
+    "content": "hi my name is dhanush .",
+    "timestamp": "2026-01-03T06:14:20.943894"
+  },
+  {
+    "role": "assistant",
+    "content": "Hi Dhanush, nice to meet you! It's interesting that we share a name.\n\nI'm Dhanush R M, an AI Engineer and Full-Stack Developer. What brings you to my website today? How can I help you?",
+    "timestamp": "2026-01-03T06:14:20.943894"
+  },
+  {
+    "role": "user",
+    "content": "have seen my linkedin page.",
+    "timestamp": "2026-01-03T06:14:43.579860"
+  },
+  {
+    "role": "assistant",
+    "content": "Thanks for letting me know! As a digital twin of Dhanush R M, I don't have the ability to browse the live internet or visit external profiles like LinkedIn directly. My purpose is to represent Dhanush R M's experience and expertise here on his website.\n\nHowever, I'd be very interested to hear about your background and what you're working on. Perhaps you could share some highlights from your profile or tell me a bit about your professional interests?",
+    "timestamp": "2026-01-03T06:14:43.579860"
+  }
+]

@@ -1,73 +1,58 @@
 import os
 import json
 import uuid
-from pathlib import Path
+from datetime import datetime
 from typing import Optional, List, Dict
 
+import boto3
+from botocore.exceptions import ClientError
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from dotenv import load_dotenv
 import google.generativeai as genai
 
-# --------------------------------------------------
-# Load environment variables
-# --------------------------------------------------
-load_dotenv(override=True)
+from context import prompt  # your system prompt function
+
+# ---------------------------------------------------
+# ENV SETUP
+# ---------------------------------------------------
+load_dotenv()
+
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 app = FastAPI()
 
-# --------------------------------------------------
+# ---------------------------------------------------
 # CORS
-# --------------------------------------------------
+# ---------------------------------------------------
 origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# --------------------------------------------------
-# Gemini Configuration
-# --------------------------------------------------
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+# ---------------------------------------------------
+# MEMORY CONFIG
+# ---------------------------------------------------
+USE_S3 = os.getenv("USE_S3", "false").lower() == "true"
+S3_BUCKET = os.getenv("S3_BUCKET", "")
+MEMORY_DIR = os.getenv("MEMORY_DIR", "../memory")
 
-# --------------------------------------------------
-# Memory directory
-# --------------------------------------------------
-MEMORY_DIR = Path("../memory")
-MEMORY_DIR.mkdir(exist_ok=True)
+if USE_S3:
+    s3_client = boto3.client("s3")
 
-# --------------------------------------------------
-# Load personality
-# --------------------------------------------------
-def load_personality() -> str:
-    with open("me.txt", "r", encoding="utf-8") as f:
-        return f.read().strip()
+# ---------------------------------------------------
+# GEMINI MODEL
+# ---------------------------------------------------
+model = genai.GenerativeModel("gemini-2.5-flash")
 
-PERSONALITY = load_personality()
-
-# --------------------------------------------------
-# Memory helpers
-# --------------------------------------------------
-def load_conversation(session_id: str) -> List[Dict]:
-    file_path = MEMORY_DIR / f"{session_id}.json"
-    if file_path.exists():
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
-
-
-def save_conversation(session_id: str, messages: List[Dict]):
-    file_path = MEMORY_DIR / f"{session_id}.json"
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(messages, f, indent=2, ensure_ascii=False)
-
-# --------------------------------------------------
-# Models
-# --------------------------------------------------
+# ---------------------------------------------------
+# MODELS
+# ---------------------------------------------------
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
@@ -77,83 +62,142 @@ class ChatResponse(BaseModel):
     response: str
     session_id: str
 
-# --------------------------------------------------
-# Routes
-# --------------------------------------------------
+
+# ---------------------------------------------------
+# MEMORY HELPERS
+# ---------------------------------------------------
+def get_memory_path(session_id: str) -> str:
+    return f"{session_id}.json"
+
+
+def load_conversation(session_id: str) -> List[Dict]:
+    if USE_S3:
+        try:
+            obj = s3_client.get_object(
+                Bucket=S3_BUCKET, Key=get_memory_path(session_id)
+            )
+            return json.loads(obj["Body"].read().decode("utf-8"))
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                return []
+            raise
+    else:
+        os.makedirs(MEMORY_DIR, exist_ok=True)
+        path = os.path.join(MEMORY_DIR, get_memory_path(session_id))
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return []
+
+
+def save_conversation(session_id: str, messages: List[Dict]):
+    if USE_S3:
+        s3_client.put_object(
+            Bucket=S3_BUCKET,
+            Key=get_memory_path(session_id),
+            Body=json.dumps(messages, indent=2),
+            ContentType="application/json",
+        )
+    else:
+        os.makedirs(MEMORY_DIR, exist_ok=True)
+        path = os.path.join(MEMORY_DIR, get_memory_path(session_id))
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(messages, f, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------
+# ROUTES
+# ---------------------------------------------------
 @app.get("/")
 async def root():
-    return {"message": "AI Digital Twin API with Memory (Gemini)"}
+    return {
+        "message": "AI Digital Twin API (Gemini)",
+        "memory_enabled": True,
+        "storage": "S3" if USE_S3 else "local",
+    }
 
 
 @app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
+async def health():
+    return {"status": "healthy", "use_s3": USE_S3}
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     try:
         session_id = request.session_id or str(uuid.uuid4())
-
-        # Load past conversation
         conversation = load_conversation(session_id)
 
-        # Build prompt (Gemini does not support role-based messages)
+        # ---------------------------------------------------
+        # BUILD GEMINI PROMPT
+        # ---------------------------------------------------
+        system_prompt = prompt()
+
         history_text = ""
-        for msg in conversation:
-            prefix = "User" if msg["role"] == "user" else "Assistant"
-            history_text += f"{prefix}: {msg['content']}\n"
+        for msg in conversation[-10:]:
+            role = msg["role"].upper()
+            history_text += f"{role}: {msg['content']}\n"
 
         full_prompt = f"""
-{PERSONALITY}
+{system_prompt}
 
 Conversation so far:
 {history_text}
 
-User:
+USER:
 {request.message}
 
-Assistant:
+ASSISTANT:
 """
 
-        model = genai.GenerativeModel("gemini-2.5-flash")
         response = model.generate_content(full_prompt)
+        assistant_reply = response.text.strip()
 
-        assistant_response = response.text.strip()
+        # ---------------------------------------------------
+        # SAVE MEMORY
+        # ---------------------------------------------------
+        conversation.append(
+            {
+                "role": "user",
+                "content": request.message,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
+        conversation.append(
+            {
+                "role": "assistant",
+                "content": assistant_reply,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
-        # Update memory
-        conversation.append({"role": "user", "content": request.message})
-        conversation.append({"role": "assistant", "content": assistant_response})
         save_conversation(session_id, conversation)
 
         return ChatResponse(
-            response=assistant_response,
-            session_id=session_id
+            response=assistant_reply,
+            session_id=session_id,
         )
 
+    except Exception as e:
+        print("Chat error:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/conversation/{session_id}")
+async def get_conversation(session_id: str):
+    try:
+        return {
+            "session_id": session_id,
+            "messages": load_conversation(session_id),
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/sessions")
-async def list_sessions():
-    sessions = []
-    for file_path in MEMORY_DIR.glob("*.json"):
-        with open(file_path, "r", encoding="utf-8") as f:
-            conversation = json.load(f)
-
-        sessions.append({
-            "session_id": file_path.stem,
-            "message_count": len(conversation),
-            "last_message": conversation[-1]["content"] if conversation else None,
-        })
-
-    return {"sessions": sessions}
-
-
-# --------------------------------------------------
-# Local run
-# --------------------------------------------------
+# ---------------------------------------------------
+# RUN
+# ---------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

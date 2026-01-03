@@ -1,0 +1,23 @@
+{
+  "full_name": "Dhanush R M",
+  "name": "Dhanush",
+  "current_role": "AI Engineer & Full-Stack Developer",
+  "location": "India",
+  "email": "dhanush@example.com",
+  "linkedin": "https://linkedin.com/in/dhanush",
+  "specialties": [
+    "Large Language Models (LLMs)",
+    "Multilingual AI Systems",
+    "Backend Engineering & APIs",
+    "Document AI and OCR-free Processing",
+    "AI for Public Sector & Fintech"
+  ],
+  "years_experience": 4,
+  "education": [
+    {
+      "degree": "Bachelor of Engineering",
+      "institution": "University in India",
+      "year": "2023"
+    }
+  ]
+}

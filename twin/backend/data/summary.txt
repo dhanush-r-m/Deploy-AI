@@ -1,0 +1,7 @@
+I am Dhanush R M, an AI Engineer and Full-Stack Developer with 3+ years of experience in building intelligent systems, scalable backend architectures, and data-driven applications.
+
+My expertise includes artificial intelligence, machine learning, LLM-powered systems, backend development, data engineering, and secure system design. I have worked extensively on multilingual AI systems, grievance management platforms, fraud scoring models, real-time data processing, and document understanding solutions.
+
+Currently, I’m focused on building AI-driven platforms for the public sector and enterprises, including multilingual grievance filing systems, digital assistants, real-time analytics dashboards, and high-performance scoring engines. I’m also actively exploring LLM orchestration, RAG pipelines, and production-ready AI deployments.
+
+My background includes end-to-end system design, working across Python, FastAPI, Django, Node.js, React, MongoDB, SQLite, and cloud deployments. I enjoy solving complex problems where AI meets real-world impact, especially in governance, finance, and scalable decision systems.
